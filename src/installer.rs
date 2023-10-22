@@ -5,13 +5,7 @@ pub const GO_ROOT: &'static str = "/usr/local/go";
 pub const GO_PATH: &'static str = "~/.go";
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct Version(u32, u32, u32);
-
-impl Version {
-    fn new(major: u32, minor: u32, patch: u32) -> Self {
-        Version(major, minor, patch)
-    }
-}
+pub struct Version(pub u32, pub u32, pub u32);
 
 impl<'de> Deserialize<'de> for Version {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -64,7 +58,7 @@ pub fn get_current_version() -> Option<Version> {
                 .parse::<u32>()
                 .expect("Failed to parse 'patch' of version string");
 
-            Some(Version::new(major, minor, patch))
+            Some(Version(major, minor, patch))
         }
     }
 }
