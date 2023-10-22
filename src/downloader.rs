@@ -1,5 +1,6 @@
 use serde::Deserialize;
 
+use crate::config::*;
 use crate::installer::Version;
 use crate::Result;
 
@@ -41,8 +42,6 @@ fn get_arch() -> &'static str {
         _ => "",
     }
 }
-
-pub const URL: &str = "https://go.dev/dl/";
 
 pub async fn check_update() -> Result<VersionMeta> {
     let res = reqwest::get(format!("{}?mode=json", URL))
@@ -97,8 +96,6 @@ pub async fn download(
         .template("{msg} {spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
         .expect("Failed to parse template")
         .progress_chars("#>-");
-
-    const NUM_THREADS: u64 = 18;
 
     let timer_start = Instant::now();
 

@@ -1,9 +1,11 @@
+mod config;
 mod downloader;
 mod installer;
 mod utils;
 
 use std::process;
 
+use config::*;
 use downloader::*;
 use installer::*;
 use utils::*;

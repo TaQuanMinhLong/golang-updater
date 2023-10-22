@@ -1,8 +1,6 @@
+use crate::config::*;
 use crate::utils::*;
 use serde::Deserialize;
-
-pub const GO_ROOT: &'static str = "/usr/local/go";
-pub const GO_PATH: &'static str = "~/.go";
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct Version(pub u32, pub u32, pub u32);
