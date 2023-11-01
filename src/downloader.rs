@@ -2,8 +2,10 @@ use serde::Deserialize;
 
 use crate::config::*;
 use crate::installer::Version;
+use crate::utils::*;
 use crate::Result;
 
+#[derive(Debug)]
 pub struct VersionMeta {
     pub version: Version,
     pub filename: String,
@@ -43,12 +45,13 @@ fn get_arch() -> &'static str {
     }
 }
 
-pub async fn check_update() -> Result<VersionMeta> {
-    let res = reqwest::get(format!("{}?mode=json", URL))
-        .await?
-        .json::<Vec<JsonResponse>>()
-        .await?;
-
+pub fn check_update() -> Result<VersionMeta> {
+    let json_string = get_stdout(&format!(
+        "curl {}?mode=json -H \"Accept: application/json\"",
+        URL
+    ));
+    let res = serde_json::from_str::<Vec<JsonResponse>>(&json_string)
+        .expect("Failed to deserialize JSON Response");
     let os = std::env::consts::OS;
     let arch = get_arch();
     let latest = &res[0];
@@ -68,88 +71,72 @@ pub async fn check_update() -> Result<VersionMeta> {
     Ok(VersionMeta { version, filename })
 }
 
-pub async fn get_file_size(filename: &str) -> Result<u64> {
+pub fn get_file_size(filename: &str) -> Result<u64> {
     let url = format!("{}{}", URL, filename);
-    let file_size = reqwest::get(&url)
-        .await?
-        .content_length()
-        .expect("Could not get the content length header");
+    let file_size = get_stdout(&format!(
+        "curl -I -L {} | awk '/content-length/ {{print $2}}'",
+        url
+    ))
+    .trim_end()
+    .parse::<u64>()?;
     Ok(file_size)
 }
 
-pub async fn download(
-    file_name: &str,
-    file_size: u64,
-    temp_folder: &std::path::PathBuf,
-) -> Result<()> {
-    use futures_util::StreamExt;
-    use indicatif::*;
-    use reqwest::header::RANGE;
-    use std::fs::{create_dir, File};
-    use std::io::{Read, Seek, SeekFrom, Write};
+pub fn download(file_name: &str, file_size: u64) -> Result<()> {
+    use std::fs::{create_dir, read, read_dir, File};
     use std::os::unix::prelude::FileExt;
+    use std::thread;
     use std::time::Instant;
-    use tempfile::tempfile;
-
-    let progress = MultiProgress::new();
-    let style = ProgressStyle::default_bar()
-        .template("{msg} {spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-        .expect("Failed to parse template")
-        .progress_chars("#>-");
 
     let timer_start = Instant::now();
 
-    let mut tasks: Vec<tokio::task::JoinHandle<(u64, File)>> =
-        Vec::with_capacity(NUM_THREADS.try_into().unwrap());
+    let temp_dir = get_temp_dir();
 
-    for i in 0..NUM_THREADS {
-        let start = file_size / NUM_THREADS * i;
-        let end = file_size / NUM_THREADS * (i + 1);
-        let pb = progress.add(ProgressBar::new(end - start + 1));
-        pb.set_style(style.clone());
-        pb.set_message(format!("Thread {}", i + 1));
-        let client = reqwest::Client::new();
-        let req = client
-            .get(format!("{}{}", URL, &file_name))
-            .header(RANGE, format!("bytes={}-{}", start, end));
-
-        let handle = tokio::task::spawn(async move {
-            let res = req.send().await.expect("Failed to send request");
-            let mut source = res.bytes_stream();
-            let mut out = tempfile().expect("Failed to create a new temporary file");
-
-            while let Some(chunk) = source.next().await {
-                let chunk = chunk.expect("Failed to get chunk");
-                let downloaded = chunk.len() as u64;
-                pb.set_position(downloaded);
-                out.write_all(&chunk).unwrap();
-            }
-            out.sync_all().unwrap();
-            out.seek(SeekFrom::Start(0)).unwrap();
-            (start, out)
-        });
-
-        tasks.push(handle)
+    if !temp_dir.exists() {
+        create_dir(&temp_dir).expect("Failed to create temporary folder")
     }
 
-    let mut parts = Vec::with_capacity(NUM_THREADS.try_into().unwrap());
+    let num_threads = get_num_threads();
 
-    for handle in tasks {
-        let value = handle.await.unwrap();
-        parts.push(value)
-    }
+    thread::scope(|s| {
+        for i in 0..num_threads {
+            let start = file_size / num_threads * i;
+            let end = file_size / num_threads * (i + 1);
+            let url = format!("{}{}", URL, &file_name);
+            let temp_file = format!("temp_{}-{}", start, end);
+            let outdir = &temp_dir.join(temp_file);
+            let cmd = format!(
+                "curl -L -o {} -H \"range: bytes={}-{}\" {}",
+                outdir.to_str().unwrap(),
+                start,
+                end,
+                url
+            );
+            s.spawn(move || exec_cmd(&cmd));
+        }
+    });
 
-    parts.sort_by_key(|(start, _)| *start);
+    let file = File::create(temp_dir.join(&file_name))?;
 
-    if !temp_folder.exists() {
-        create_dir(temp_folder).expect("Failed to create temporary folder")
-    }
+    let entries = read_dir(&temp_dir)?;
 
-    let file = File::create(temp_folder.join(file_name))?;
-
-    for (offset, mut part) in parts {
-        let mut buf = Vec::new();
-        part.read_to_end(&mut buf)?;
+    for entry in entries {
+        let entry = entry?;
+        let filename = entry.file_name();
+        let filename = filename.to_string_lossy();
+        if filename == file_name {
+            continue;
+        }
+        let offset = filename
+            .trim_start_matches("temp_")
+            .split("-")
+            .next()
+            .expect(&format!(
+                "Failed to parse temp file: {}",
+                &entry.file_name().to_string_lossy()
+            ))
+            .parse::<u64>()?;
+        let buf = read(entry.path())?;
         file.write_at(&buf, offset)?;
     }
 

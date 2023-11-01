@@ -1,15 +1,10 @@
 [package]
-name = "golang_updater"
+name = "update_go"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-reqwest = { version = "0.11", features = ["json", "stream"] }
-tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0.188", features = ["derive"] }
 serde_json = "1.0.107"
-indicatif = { version = "0.17.7", features = ["tokio"] }
-futures-util = "0.3.28"
-tempfile = "3.8.0"

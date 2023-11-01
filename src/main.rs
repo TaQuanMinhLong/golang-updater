@@ -3,8 +3,6 @@ mod downloader;
 mod installer;
 mod utils;
 
-use std::process;
-
 use config::*;
 use downloader::*;
 use installer::*;
@@ -12,12 +10,9 @@ use utils::*;
 
 pub type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     println!("\nChecking for updates...");
-    let version_meta = check_update()
-        .await
-        .expect("Failed to get latest version metadata");
+    let version_meta = check_update()?;
     let latest = version_meta.version;
     let current = get_current_version();
 
@@ -25,31 +20,32 @@ async fn main() -> Result<()> {
         let current = current.unwrap();
         if current == latest {
             println!("Go version has already been latest");
-            process::exit(1)
+            std::process::exit(1)
         }
     }
     println!("\nRemoving old version...");
     remove_old_version();
 
-    println!("\nDownloading latest version...");
-    let temp_folder = std::env::current_dir()
-        .expect("Failed to get current directory")
-        .join("temp");
     let file_name = &version_meta.filename;
-    let file_size = get_file_size(&file_name).await?;
-    download(&file_name, file_size, &temp_folder).await?;
+    let file_size = get_file_size(&file_name)?;
+    println!("\nDownloading latest version...");
+    download(&file_name, file_size)?;
 
+    let temp_dir = get_temp_dir();
     exec_cmd(&format!(
         "sudo tar -C {} -xzf {}",
         GO_ROOT.trim_end_matches("/go"),
-        &temp_folder.join(&file_name).to_string_lossy()
+        &temp_dir.join(&file_name).to_string_lossy()
     ));
 
     println!("\nRemoving temporary download...");
-    remove_temp_folder(&temp_folder);
+    remove_temp_folder(&temp_dir);
+
     println!("\nConfig PATH environment variable");
     config_path_env();
+
     let version = get_stdout("go version");
     println!("\nSuccessfully updated go: {}", version);
+
     Ok(())
 }
